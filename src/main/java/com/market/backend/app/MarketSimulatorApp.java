@@ -1,5 +1,7 @@
 package com.market.backend.app;
 
+import com.market.backend.book.OrderBookSimulation;
+import com.market.backend.book.PriceLevel;
 import com.market.backend.csv.CsvIngestionService;
 import com.market.backend.csv.CsvMarketEventReader;
 import com.market.backend.db.Database;
@@ -39,6 +41,7 @@ public final class MarketSimulatorApp {
             case "replay-db" -> replayDb(args);
             case "benchmark" -> benchmark(args);
             case "benchmark-synthetic" -> benchmarkSynthetic(args);
+            case "lob-demo" -> lobDemo(args);
             default -> {
                 System.err.println("Unknown command: " + args[0]);
                 usage();
@@ -91,6 +94,29 @@ public final class MarketSimulatorApp {
                 42L);
         BacktestResult result = engine().run(generator, strategy(args[2]), DEFAULT_INITIAL_CASH, executionConfigFromEnv());
         printResult(result);
+    }
+
+    private static void lobDemo(String[] args) {
+        requireArgs(args, 2, "lob-demo <orders> [seed]");
+        int orders = Integer.parseInt(args[1]);
+        long seed = args.length >= 3 ? Long.parseLong(args[2]) : 42L;
+        OrderBookSimulation simulation = new OrderBookSimulation("SYNTH", 100.0, seed);
+        OrderBookSimulation.Result result = simulation.run(orders);
+
+        System.out.printf("Orders submitted: %,d%n", result.ordersSubmitted());
+        System.out.printf("Fills generated: %,d%n", result.fillsGenerated());
+        System.out.printf("Volume filled: %,.0f shares%n", result.volumeFilled());
+        System.out.printf("Throughput: %,.0f orders/sec%n", result.ordersPerSecond());
+        System.out.printf("Best bid/ask: %.2f / %.2f%n", result.bestBid(), result.bestAsk());
+        System.out.printf("Spread: %.4f%n", result.spread());
+        System.out.println("Top bid levels (price, qty, orders):");
+        for (PriceLevel level : result.bidDepth()) {
+            System.out.printf("  %.2f  qty=%.0f  orders=%d%n", level.price(), level.totalQuantity(), level.orderCount());
+        }
+        System.out.println("Top ask levels (price, qty, orders):");
+        for (PriceLevel level : result.askDepth()) {
+            System.out.printf("  %.2f  qty=%.0f  orders=%d%n", level.price(), level.totalQuantity(), level.orderCount());
+        }
     }
 
     private static Strategy strategy(String name) {
@@ -189,6 +215,8 @@ public final class MarketSimulatorApp {
                   benchmark <csv-path> <ma|mm>   Replay CSV and print runtime/memory metrics
                   benchmark-synthetic <events> <ma|mm> [symbols]
                                                   Generate and replay synthetic events
+                  lob-demo <orders> [seed]        Run synthetic order flow through the
+                                                  price-time-priority limit order book
 
                 CSV columns:
                   symbol,timestamp,type,price,volume,bid_price,bid_size,ask_price,ask_size

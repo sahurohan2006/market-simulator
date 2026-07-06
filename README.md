@@ -12,6 +12,7 @@ Java 17 backend for ingesting historical market CSV data, normalizing it into Po
 - Includes moving average crossover and simple market making strategies.
 - Uses configurable commission, slippage, shorting, and inventory limits.
 - Tracks trade history, positions, final equity, PnL, Sharpe, Sortino, Calmar, volatility, win rate, turnover, max drawdown, runtime, memory delta, throughput, and latency percentiles.
+- Includes a standalone price-time-priority limit order book matching engine with partial fills, multi-level sweeps, and order cancellation.
 
 ## Run Locally
 
@@ -130,11 +131,46 @@ MAX_ABSOLUTE_POSITION=1000
 
 Price events fill at the event price plus/minus slippage. Order-book events fill buys at ask and sells at bid, then apply slippage and commission. Orders that violate shorting or inventory constraints are rejected.
 
+## Limit Order Book Matching Engine
+
+`com.market.backend.book.OrderBook` is a standalone price-time-priority matching
+engine, independent of the CSV/PostgreSQL replay pipeline above:
+
+- Bids/asks are kept in separate price-ordered maps, each price level holding a
+  FIFO queue so that, within a level, the earliest resting order always fills first.
+- Limit orders match immediately against any crossing resting orders (potentially
+  sweeping multiple price levels and partially filling individual resting orders),
+  then rest any unfilled remainder in the book.
+- Market orders sweep the book regardless of price; any unfilled remainder is
+  dropped rather than resting, modeling an immediate-or-cancel order.
+- Orders can be cancelled by id in O(1) average lookup plus O(level size) removal.
+
+Run the synthetic order-flow demo:
+
+```bash
+mvn exec:java -Dexec.args="lob-demo 100000 7"
+```
+
+```text
+Orders submitted: 100,000
+Fills generated: 90,994
+Volume filled: 429,299 shares
+Throughput: 4,293,942 orders/sec
+Best bid/ask: 120.27 / 120.30
+Spread: 0.0300
+```
+
+Covered by `OrderBookTest`: resting non-crossing orders, exact and partial fills,
+price-time priority within a level, multi-level market order sweeps, unfilled
+market order remainder handling, and cancellation.
+
 ## Resume Framing
 
 Possible resume bullets:
 
 > Built a Java backtesting engine executing moving-average and market-making strategies over 1M+ synthetic and 6 years of real historical trade events, with slippage-, commission-, and position-limit-aware order execution.
+
+> Implemented a price-time-priority limit order book matching engine in Java supporting partial fills, multi-level sweeps, and order cancellation, validated with unit tests covering priority, partial fills, and edge cases.
 
 > Designed a PostgreSQL-backed event store with 5,000-row JDBC batch ingestion and a `(symbol, event_time, id)` index, enabling forward-only chronological replay validated against a real 6-year, multi-symbol historical dataset.
 
