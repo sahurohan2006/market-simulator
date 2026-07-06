@@ -57,6 +57,25 @@ DB_PASSWORD=market \
 mvn exec:java -Dexec.args="replay-db AAPL ma"
 ```
 
+## Real Historical Dataset
+
+`data/market_history_2019_2024.csv.gz` contains 18,108 events derived from real
+daily OHLCV data (Yahoo Finance, via `yfinance`) for AAPL, MSFT, and SPY from
+2019-01-01 through 2024-12-30 (six years). Each trading day's open/high/low/close
+is expanded into four synthetic intraday `PRICE` timestamps (09:30/11:00/13:30/16:00)
+to give the replay engine a chronological event stream; this is a derived/synthetic
+intraday schedule, not real tick-level intraday data.
+
+Ingest and replay it end-to-end:
+
+```bash
+docker compose up -d
+DB_URL=jdbc:postgresql://localhost:5432/market DB_USER=market DB_PASSWORD=market \
+  mvn exec:java -Dexec.args="ingest data/market_history_2019_2024.csv.gz"
+DB_URL=jdbc:postgresql://localhost:5432/market DB_USER=market DB_PASSWORD=market \
+  mvn exec:java -Dexec.args="replay-db ALL ma"
+```
+
 ## Scaling Notes
 
 For 1M+ events, ingest uses 5,000-row JDBC batches and replay uses `ORDER BY event_time, id` with an index on `(symbol, event_time, id)`. Keep source CSV sorted when using `replay-csv`; use `replay-db` when multiple files or symbols need guaranteed chronological ordering.
@@ -73,7 +92,30 @@ Memory delta: 239.68 MB
 Trades: 2,110
 ```
 
-Treat this as a baseline, not a universal result. Hardware, JVM warmup, GC, strategy complexity, and whether data comes from CSV/PostgreSQL will change throughput.
+Treat this as a baseline, not a universal result. Hardware, JVM warmup, GC, strategy complexity, and whether data comes from CSV/PostgreSQL will change throughput. **This synthetic-generator number reflects only the in-memory strategy/portfolio loop — it does not include PostgreSQL I/O.**
+
+For comparison, here is a real `replay-db` run against the 6-year, 18,108-event
+historical dataset above, which does include the JDBC cursor query and network
+round trip to PostgreSQL:
+
+```text
+mvn exec:java -Dexec.args="replay-db ALL ma"
+
+Events processed: 18,108
+Throughput: 280,136 events/sec
+Runtime: 0.065 seconds
+Latency nanos avg/p50/p95/p99: 484 / 292 / 1208 / 2583
+Memory delta: 10.93 MB
+Final equity: $426,746.66
+PnL: $326,746.66
+Sharpe: 0.2028
+Max drawdown: 41.40%
+Trades: 100
+```
+
+DB-backed replay is roughly an order of magnitude slower than the pure in-memory
+synthetic benchmark, which is expected once JDBC network round trips and query
+execution are in the critical path.
 
 ## Execution Model
 
@@ -90,6 +132,10 @@ Price events fill at the event price plus/minus slippage. Order-book events fill
 
 ## Resume Framing
 
-Possible resume bullet:
+Possible resume bullets:
 
-> Built a Java/PostgreSQL market replay and backtesting engine for historical trade/quote data with compressed CSV ingestion, JDBC batch persistence, 1M+ event synthetic benchmarks, pluggable strategies, transaction-cost-aware execution, PnL/risk analytics, and throughput/latency/memory reporting.
+> Built a Java backtesting engine executing moving-average and market-making strategies over 1M+ synthetic and 6 years of real historical trade events, with slippage-, commission-, and position-limit-aware order execution.
+
+> Designed a PostgreSQL-backed event store with 5,000-row JDBC batch ingestion and a `(symbol, event_time, id)` index, enabling forward-only chronological replay validated against a real 6-year, multi-symbol historical dataset.
+
+> Achieved ~4.5M events/sec in-memory backtest throughput (280K events/sec end-to-end with PostgreSQL-backed replay) and instrumented the engine with p50/p95/p99 latency, memory delta, and risk analytics (Sharpe, Sortino, Calmar, max drawdown, turnover); validated with JUnit and CI on every push.
